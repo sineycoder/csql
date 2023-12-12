@@ -264,13 +264,13 @@ func (n *Node) ToSQL() string {
 		// 表注释
 
 		if len(t.Comment) > 0 {
-			tmpBuf.WriteStringln(fmt.Sprintf("COMMENT ON TABLE %s IS '%s'", t.Name, t.Comment))
+			tmpBuf.WriteStringln(fmt.Sprintf("COMMENT ON TABLE %s IS '%s';", t.Name, t.Comment))
 		}
 
 		// 列注释
 		for _, col := range t.Columns {
 			if len(col.Comment) > 0 {
-				tmpBuf.WriteStringln(fmt.Sprintf("COMMENT ON COLUMN %s.%s IS '%s'", t.Name, col.Name, col.Comment))
+				tmpBuf.WriteStringln(fmt.Sprintf("COMMENT ON COLUMN %s.%s IS '%s';", t.Name, col.Name, col.Comment))
 			}
 		}
 
