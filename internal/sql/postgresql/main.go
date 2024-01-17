@@ -53,8 +53,7 @@ func (c *Constraint) Write(buf *sql.SQLBuffer) (isWrite bool) {
 	return true
 }
 
-func (n *Node) ToSQL() string {
-	resBuf := sql.NewSQLBuffer()
+func (n *Node) writeSQLWithCreateTable(buf *sql.SQLBuffer) {
 	tmpBuf := sql.NewSQLBuffer()
 
 	// ddl
@@ -107,63 +106,67 @@ func (n *Node) ToSQL() string {
 		}
 
 		tmpBuf.WriteByte('\n')
-		resBuf.Write(tmpBuf.Bytes())
+		buf.Write(tmpBuf.Bytes())
 	}
 
 	if hasAutoIncrement {
-		resBuf.WriteStringln("DO")
-		resBuf.WriteStringln("$BLOCK$")
-		resBuf.WriteNTabStringln("BEGIN", 1)
+		buf.WriteStringln("DO")
+		buf.WriteStringln("$BLOCK$")
+		buf.WriteNTabStringln("BEGIN", 1)
 		for _, t := range n.Tables {
 			for _, col := range t.Columns {
 				if col.IsPrimaryKey && col.IsIncrement {
-					resBuf.WriteNTabStringln("BEGIN", 2)
-					resBuf.WriteNTabStringln(fmt.Sprintf(`CREATE SEQUENCE "%s_id_seq" INCREMENT 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1;`, t.Name), 3)
-					resBuf.WriteNTabStringln(fmt.Sprintf(`ALTER SEQUENCE "%s_id_seq" OWNED BY "%s".%s;`, t.Name, t.Name, col.Name), 3)
-					resBuf.WriteNTabStringln(fmt.Sprintf(`ALTER TABLE "%s" ALTER COLUMN id SET DEFAULT nextval('%s_id_seq');`, t.Name, t.Name), 3)
-					resBuf.WriteNTabStringln("EXCEPTION", 2)
-					resBuf.WriteNTabStringln("WHEN OTHERS", 3)
-					resBuf.WriteNTabStringln(fmt.Sprintf(`THEN RAISE NOTICE 'create %s_id_seq sequence err';`, t.Name), 4)
-					resBuf.WriteNTabStringln("END;", 2)
+					buf.WriteNTabStringln("BEGIN", 2)
+					buf.WriteNTabStringln(fmt.Sprintf(`CREATE SEQUENCE "%s_id_seq" INCREMENT 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1;`, t.Name), 3)
+					buf.WriteNTabStringln(fmt.Sprintf(`ALTER SEQUENCE "%s_id_seq" OWNED BY "%s".%s;`, t.Name, t.Name, col.Name), 3)
+					buf.WriteNTabStringln(fmt.Sprintf(`ALTER TABLE "%s" ALTER COLUMN id SET DEFAULT nextval('%s_id_seq');`, t.Name, t.Name), 3)
+					buf.WriteNTabStringln("EXCEPTION", 2)
+					buf.WriteNTabStringln("WHEN OTHERS", 3)
+					buf.WriteNTabStringln(fmt.Sprintf(`THEN RAISE NOTICE 'create %s_id_seq sequence err';`, t.Name), 4)
+					buf.WriteNTabStringln("END;", 2)
 
 				}
 			}
 		}
-		resBuf.WriteNTabStringln("END;", 1)
-		resBuf.WriteStringln("$BLOCK$;")
-		resBuf.WriteStringln("END;")
-		resBuf.WriteByte('\n')
+		buf.WriteNTabStringln("END;", 1)
+		buf.WriteStringln("$BLOCK$;")
+		buf.WriteStringln("END;")
+		buf.WriteByte('\n')
 	}
 
 	if hasIndex {
-		resBuf.WriteStringln("DO")
-		resBuf.WriteStringln("$BLOCK$")
-		resBuf.WriteNTabStringln("BEGIN", 1)
+		buf.WriteStringln("DO")
+		buf.WriteStringln("$BLOCK$")
+		buf.WriteNTabStringln("BEGIN", 1)
 		for _, t := range n.Tables {
 			for _, con := range t.Constraints {
 				if con.RawTp == ast.ConstraintIndex {
-					resBuf.WriteNTabStringln("BEGIN", 2)
+					buf.WriteNTabStringln("BEGIN", 2)
 					indexName := "idx_" + t.Name
 					var keyName []string
 					for _, k := range con.Keys {
 						indexName += "_" + k
 						keyName = append(keyName, quota(k))
 					}
-					resBuf.WriteNTabStringln(fmt.Sprintf(`CREATE INDEX "%s" ON "%s" (%s);`, indexName, t.Name, strings.Join(keyName, ",")), 3)
-					resBuf.WriteNTabStringln("EXCEPTION", 2)
-					resBuf.WriteNTabStringln("WHEN duplicate_table", 3)
-					resBuf.WriteNTabStringln(fmt.Sprintf(`THEN RAISE NOTICE 'index ''%s'' on %s already exists, skipping';`, indexName, t.Name), 4)
-					resBuf.WriteNTabStringln("END;", 2)
+					buf.WriteNTabStringln(fmt.Sprintf(`CREATE INDEX "%s" ON "%s" (%s);`, indexName, t.Name, strings.Join(keyName, ",")), 3)
+					buf.WriteNTabStringln("EXCEPTION", 2)
+					buf.WriteNTabStringln("WHEN duplicate_table", 3)
+					buf.WriteNTabStringln(fmt.Sprintf(`THEN RAISE NOTICE 'index ''%s'' on %s already exists, skipping';`, indexName, t.Name), 4)
+					buf.WriteNTabStringln("END;", 2)
 				}
 			}
 		}
-		resBuf.WriteNTabStringln("END;", 1)
-		resBuf.WriteStringln("$BLOCK$;")
-		resBuf.WriteStringln("END;")
-		resBuf.WriteByte('\n')
+		buf.WriteNTabStringln("END;", 1)
+		buf.WriteStringln("$BLOCK$;")
+		buf.WriteStringln("END;")
+		buf.WriteByte('\n')
 	}
+}
 
-	return strings.TrimSpace(resBuf.String())
+func (n *Node) ToSQL() string {
+	buf := sql.NewSQLBuffer()
+	n.writeSQLWithCreateTable(buf)
+	return strings.TrimSpace(buf.String())
 }
 
 func quota(fieldName string) string {
