@@ -135,30 +135,46 @@ func (n *Node) writeSQLWithCreateTable(buf *sql.SQLBuffer) {
 	}
 
 	if hasIndex {
-		buf.WriteStringln("DO")
-		buf.WriteStringln("$BLOCK$")
-		buf.WriteNTabStringln("BEGIN", 1)
-		for _, t := range n.Tables {
-			for _, con := range t.Constraints {
-				if con.RawTp == ast.ConstraintIndex {
-					buf.WriteNTabStringln("BEGIN", 2)
-					indexName := "idx_" + t.Name
-					var keyName []string
-					for _, k := range con.Keys {
-						indexName += "_" + k
-						keyName = append(keyName, quota(k))
+		if n.Version >= 9.5 {
+			for _, t := range n.Tables {
+				for _, con := range t.Constraints {
+					if con.RawTp == ast.ConstraintIndex {
+						indexName := "idx_" + t.Name
+						var keyName []string
+						for _, k := range con.Keys {
+							indexName += "_" + k
+							keyName = append(keyName, quota(k))
+						}
+						buf.WriteStringln(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS "%s" ON "%s" (%s);`, indexName, t.Name, strings.Join(keyName, ",")))
 					}
-					buf.WriteNTabStringln(fmt.Sprintf(`CREATE INDEX "%s" ON "%s" (%s);`, indexName, t.Name, strings.Join(keyName, ",")), 3)
-					buf.WriteNTabStringln("EXCEPTION", 2)
-					buf.WriteNTabStringln("WHEN duplicate_table", 3)
-					buf.WriteNTabStringln(fmt.Sprintf(`THEN RAISE NOTICE 'index ''%s'' on %s already exists, skipping';`, indexName, t.Name), 4)
-					buf.WriteNTabStringln("END;", 2)
 				}
 			}
+		} else {
+			buf.WriteStringln("DO")
+			buf.WriteStringln("$BLOCK$")
+			buf.WriteNTabStringln("BEGIN", 1)
+			for _, t := range n.Tables {
+				for _, con := range t.Constraints {
+					if con.RawTp == ast.ConstraintIndex {
+						buf.WriteNTabStringln("BEGIN", 2)
+						indexName := "idx_" + t.Name
+						var keyName []string
+						for _, k := range con.Keys {
+							indexName += "_" + k
+							keyName = append(keyName, quota(k))
+						}
+						buf.WriteNTabStringln(fmt.Sprintf(`CREATE INDEX "%s" ON "%s" (%s);`, indexName, t.Name, strings.Join(keyName, ",")), 3)
+						buf.WriteNTabStringln("EXCEPTION", 2)
+						buf.WriteNTabStringln("WHEN duplicate_table", 3)
+						buf.WriteNTabStringln(fmt.Sprintf(`THEN RAISE NOTICE 'index ''%s'' on %s already exists, skipping';`, indexName, t.Name), 4)
+						buf.WriteNTabStringln("END;", 2)
+					}
+				}
+			}
+			buf.WriteNTabStringln("END;", 1)
+			buf.WriteStringln("$BLOCK$;")
+			buf.WriteStringln("END;")
 		}
-		buf.WriteNTabStringln("END;", 1)
-		buf.WriteStringln("$BLOCK$;")
-		buf.WriteStringln("END;")
 		buf.WriteByte('\n')
 	}
 }

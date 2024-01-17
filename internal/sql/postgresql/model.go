@@ -3,7 +3,8 @@ package postgresql
 import "github.com/pingcap/tidb/parser/ast"
 
 type Node struct {
-	Tables []*Table
+	Tables  []*Table
+	Version float64
 }
 
 type Keys []string

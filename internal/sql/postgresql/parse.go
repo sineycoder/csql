@@ -144,7 +144,7 @@ func (v *Node) Enter(in ast.Node) (ast.Node, bool) {
 		v.parseTable(sc)
 		return in, true
 	}
-	fmt.Printf("%T -> %+v\n", in, in)
+	//fmt.Printf("%T -> %+v\n", in, in)
 	return in, false
 }
 

@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	Postgresql = "postgresql"
-	Oracle     = "oracle"
+	PostgresqlCompatible = "postgresql-compatible"
+	Postgresql           = "postgresql"
+	Oracle               = "oracle"
 )
 
 func parse(sql string) (*ast.StmtNode, error) {
@@ -49,7 +50,7 @@ func Run(path string, output string) error {
 
 	prompt := promptui.Select{
 		Label: "Select db type you want to convert to",
-		Items: []string{Postgresql},
+		Items: []string{PostgresqlCompatible, Postgresql},
 	}
 
 	_, choose, err := prompt.Run()
@@ -75,7 +76,11 @@ func Run(path string, output string) error {
 
 	var result string
 	switch choose {
+	case PostgresqlCompatible:
+		tableNode.Version = 9.4
+		result = tableNode.ToSQL()
 	case Postgresql:
+		tableNode.Version = 9.5
 		result = tableNode.ToSQL()
 	default:
 		return fmt.Errorf("not support")
