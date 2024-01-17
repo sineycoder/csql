@@ -3,6 +3,7 @@ package mysql
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/csql/internal/sql/postgresql"
@@ -30,11 +31,21 @@ func parse(sql string) (*ast.StmtNode, error) {
 	return &stmtNodes[0], nil
 }
 
+var (
+	reg1 = regexp.MustCompile("/\\*[\\s\\S]*\\*/")
+	reg2 = regexp.MustCompile("--.*\n")
+)
+
 func Run(path string, output string) error {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("seleted path must be a mysql sql file")
 	}
+
+	sql := string(b)
+	sql = reg1.ReplaceAllString(sql, "")
+	sql = reg2.ReplaceAllString(sql, "")
+	sql = strings.TrimSpace(sql)
 
 	prompt := promptui.Select{
 		Label: "Select db type you want to convert to",
@@ -46,7 +57,7 @@ func Run(path string, output string) error {
 		return err
 	}
 
-	splits := strings.Split(string(b), ";")
+	splits := strings.Split(sql, ";")
 	tableNode := &postgresql.Node{}
 	for _, s := range splits {
 		s = strings.TrimSpace(s)
