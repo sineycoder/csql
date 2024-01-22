@@ -5,177 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/csql/internal/sql"
 	"github.com/pingcap/tidb/parser/ast"
-	"github.com/pingcap/tidb/parser/mysql"
-	"github.com/pingcap/tidb/types"
-	driver "github.com/pingcap/tidb/types/parser_driver"
+	"github.com/sineycoder/csql/internal/sql"
 )
-
-type Node struct {
-	Tables []*Table
-}
-
-type Column struct {
-	Name         string
-	Type         string
-	DefaultValue string
-	IsNotNull    bool
-	IsPrimaryKey bool
-	IsIncrement  bool
-	Comment      string
-}
-
-type Keys []string
-
-type Constraint struct {
-	Name  string
-	RawTp ast.ConstraintType // ast.ConstraintUniq/ast.ConstraintPrimaryKey can be written in table
-	Keys  Keys
-}
-
-func (v *Node) parseColumn(stmt *ast.CreateTableStmt) []*Column {
-	var columns []*Column
-	for _, col := range stmt.Cols {
-		c := &Column{}
-		c.Name = col.Name.Name.O
-		switch col.Tp.GetType() {
-		case mysql.TypeTiny, mysql.TypeShort:
-			c.Type = "smallint"
-		case mysql.TypeLong:
-			c.Type = "int"
-		case mysql.TypeInt24, mysql.TypeLonglong:
-			c.Type = "bigint"
-		case mysql.TypeFloat:
-			c.Type = "real"
-		case mysql.TypeDouble:
-			c.Type = "double precision"
-		case mysql.TypeNewDecimal:
-			if col.Tp.GetFlen() == -1 && col.Tp.GetDecimal() == -1 {
-				c.Type = "decimal"
-			} else {
-				c.Type = fmt.Sprintf("decimal(%d,%d)", col.Tp.GetFlen(), col.Tp.GetDecimal())
-			}
-		case mysql.TypeString:
-			c.Type = fmt.Sprintf("char(%d)", col.Tp.GetFlen())
-		case mysql.TypeVarchar:
-			c.Type = fmt.Sprintf("varchar(%d)", col.Tp.GetFlen())
-		case mysql.TypeJSON:
-			c.Type = "json"
-		case mysql.TypeLongBlob, mysql.TypeTinyBlob, mysql.TypeBlob, mysql.TypeMediumBlob:
-			if mysql.HasBinaryFlag(col.Tp.GetFlag()) {
-				c.Type = "bytea"
-			} else {
-				c.Type = "text"
-			}
-		case mysql.TypeVarString:
-			c.Type = "text"
-		case mysql.TypeTimestamp, mysql.TypeDatetime:
-			c.Type = "timestamp(0)"
-		case mysql.TypeDate:
-			c.Type = "date"
-		default:
-			panic(fmt.Sprintf("%s.%s' type cannot support in pg", stmt.Table.Name.O, c.Name))
-		}
-
-		for idx, op := range col.Options {
-			switch op.Tp {
-			case ast.ColumnOptionNotNull:
-				c.IsNotNull = true
-			case ast.ColumnOptionPrimaryKey:
-				c.IsPrimaryKey = true
-			case ast.ColumnOptionAutoIncrement:
-				c.IsIncrement = true
-			case ast.ColumnOptionComment:
-				if expr, ok := op.Expr.(*driver.ValueExpr); ok {
-					c.Comment = expr.GetDatumString()
-				}
-
-			case ast.ColumnOptionDefaultValue:
-				switch tp := op.Expr.(type) {
-				case *driver.ValueExpr:
-					switch tp.Datum.Kind() {
-					case types.KindInt64:
-						c.DefaultValue = fmt.Sprintf("%d", tp.Datum.GetInt64())
-					case types.KindUint64:
-						c.DefaultValue = fmt.Sprintf("%d", tp.Datum.GetUint64())
-					case types.KindMysqlDecimal:
-						d := tp.Datum.GetInterface().(*types.MyDecimal)
-						c.DefaultValue = d.String()
-					case types.KindString:
-						c.DefaultValue = quotaValue(string(tp.Datum.GetBytes()))
-					}
-				case *ast.FuncCallExpr:
-					if col.Tp.GetType() == mysql.TypeTimestamp || col.Tp.GetType() == mysql.TypeDatetime {
-						c.DefaultValue = tp.FnName.O
-					} else {
-						panic(fmt.Sprintf("%s.%s %d option cannot support in pg", stmt.Table.Name.O, c.Name, idx))
-					}
-				}
-			}
-		}
-		columns = append(columns, c)
-	}
-
-	return columns
-}
-
-func (v *Node) parseConstraint(stmt *ast.CreateTableStmt, t *Table) []*Constraint {
-	var constraints []*Constraint
-	for _, con := range stmt.Constraints {
-		c := &Constraint{}
-		c.RawTp = con.Tp
-		c.Name = con.Name
-		for _, key := range con.Keys {
-			c.Keys = append(c.Keys, key.Column.Name.O)
-		}
-		if c.RawTp == ast.ConstraintPrimaryKey {
-		j:
-			for _, col := range t.Columns {
-				for _, key := range c.Keys {
-					if col.Name == key {
-						col.IsPrimaryKey = true
-						break j
-					}
-				}
-			}
-		}
-		constraints = append(constraints, c)
-	}
-	return constraints
-}
-
-func (v *Node) parseTable(stmt *ast.CreateTableStmt) {
-	t := &Table{}
-	t.Name = stmt.Table.Name.O
-	t.IfNotExists = stmt.IfNotExists
-
-	t.Columns = v.parseColumn(stmt)
-
-	t.Constraints = v.parseConstraint(stmt, t)
-
-	for _, op := range stmt.Options {
-		switch op.Tp {
-		case ast.TableOptionComment:
-			t.Comment = op.StrValue
-		}
-	}
-
-	v.Tables = append(v.Tables, t)
-}
-
-func (v *Node) Enter(in ast.Node) (ast.Node, bool) {
-	if sc, ok := in.(*ast.CreateTableStmt); ok {
-		v.parseTable(sc)
-		return in, true
-	}
-	//fmt.Printf("%T -> %+v\n", in, in)
-	return in, false
-}
-
-func (v *Node) Leave(in ast.Node) (ast.Node, bool) {
-	return in, true
-}
 
 func (c *Column) Write(buf *sql.SQLBuffer) (isWrite bool) {
 	buf.WriteByte('\t')
@@ -221,8 +53,7 @@ func (c *Constraint) Write(buf *sql.SQLBuffer) (isWrite bool) {
 	return true
 }
 
-func (n *Node) ToSQL() string {
-	resBuf := sql.NewSQLBuffer()
+func (n *Node) writeSQLWithCreateTable(buf *sql.SQLBuffer) {
 	tmpBuf := sql.NewSQLBuffer()
 
 	// ddl
@@ -275,63 +106,83 @@ func (n *Node) ToSQL() string {
 		}
 
 		tmpBuf.WriteByte('\n')
-		resBuf.Write(tmpBuf.Bytes())
+		buf.Write(tmpBuf.Bytes())
 	}
 
 	if hasAutoIncrement {
-		resBuf.WriteStringln("DO")
-		resBuf.WriteStringln("$BLOCK$")
-		resBuf.WriteNTabStringln("BEGIN", 1)
+		buf.WriteStringln("DO")
+		buf.WriteStringln("$BLOCK$")
+		buf.WriteNTabStringln("BEGIN", 1)
 		for _, t := range n.Tables {
 			for _, col := range t.Columns {
 				if col.IsPrimaryKey && col.IsIncrement {
-					resBuf.WriteNTabStringln("BEGIN", 2)
-					resBuf.WriteNTabStringln(fmt.Sprintf(`CREATE SEQUENCE "%s_id_seq" INCREMENT 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1;`, t.Name), 3)
-					resBuf.WriteNTabStringln(fmt.Sprintf(`ALTER SEQUENCE "%s_id_seq" OWNED BY "%s".%s;`, t.Name, t.Name, col.Name), 3)
-					resBuf.WriteNTabStringln(fmt.Sprintf(`ALTER TABLE "%s" ALTER COLUMN id SET DEFAULT nextval('%s_id_seq');`, t.Name, t.Name), 3)
-					resBuf.WriteNTabStringln("EXCEPTION", 2)
-					resBuf.WriteNTabStringln("WHEN OTHERS", 3)
-					resBuf.WriteNTabStringln(fmt.Sprintf(`THEN RAISE NOTICE 'create %s_id_seq sequence err';`, t.Name), 4)
-					resBuf.WriteNTabStringln("END;", 2)
+					buf.WriteNTabStringln("BEGIN", 2)
+					buf.WriteNTabStringln(fmt.Sprintf(`CREATE SEQUENCE "%s_id_seq" INCREMENT 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1;`, t.Name), 3)
+					buf.WriteNTabStringln(fmt.Sprintf(`ALTER SEQUENCE "%s_id_seq" OWNED BY "%s".%s;`, t.Name, t.Name, col.Name), 3)
+					buf.WriteNTabStringln(fmt.Sprintf(`ALTER TABLE "%s" ALTER COLUMN id SET DEFAULT nextval('%s_id_seq');`, t.Name, t.Name), 3)
+					buf.WriteNTabStringln("EXCEPTION", 2)
+					buf.WriteNTabStringln("WHEN OTHERS", 3)
+					buf.WriteNTabStringln(fmt.Sprintf(`THEN RAISE NOTICE 'create %s_id_seq sequence err';`, t.Name), 4)
+					buf.WriteNTabStringln("END;", 2)
 
 				}
 			}
 		}
-		resBuf.WriteNTabStringln("END;", 1)
-		resBuf.WriteStringln("$BLOCK$;")
-		resBuf.WriteStringln("END;")
-		resBuf.WriteByte('\n')
+		buf.WriteNTabStringln("END;", 1)
+		buf.WriteStringln("$BLOCK$;")
+		buf.WriteStringln("END;")
+		buf.WriteByte('\n')
 	}
 
 	if hasIndex {
-		resBuf.WriteStringln("DO")
-		resBuf.WriteStringln("$BLOCK$")
-		resBuf.WriteNTabStringln("BEGIN", 1)
-		for _, t := range n.Tables {
-			for _, con := range t.Constraints {
-				if con.RawTp == ast.ConstraintIndex {
-					resBuf.WriteNTabStringln("BEGIN", 2)
-					indexName := "idx_" + t.Name
-					var keyName []string
-					for _, k := range con.Keys {
-						indexName += "_" + k
-						keyName = append(keyName, quota(k))
+		if n.Version >= 9.5 {
+			for _, t := range n.Tables {
+				for _, con := range t.Constraints {
+					if con.RawTp == ast.ConstraintIndex {
+						indexName := "idx_" + t.Name
+						var keyName []string
+						for _, k := range con.Keys {
+							indexName += "_" + k
+							keyName = append(keyName, quota(k))
+						}
+						buf.WriteStringln(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS "%s" ON "%s" (%s);`, indexName, t.Name, strings.Join(keyName, ",")))
 					}
-					resBuf.WriteNTabStringln(fmt.Sprintf(`CREATE INDEX "%s" ON "%s" (%s);`, indexName, t.Name, strings.Join(keyName, ",")), 3)
-					resBuf.WriteNTabStringln("EXCEPTION", 2)
-					resBuf.WriteNTabStringln("WHEN duplicate_table", 3)
-					resBuf.WriteNTabStringln(fmt.Sprintf(`THEN RAISE NOTICE 'index ''%s'' on %s already exists, skipping';`, indexName, t.Name), 4)
-					resBuf.WriteNTabStringln("END;", 2)
 				}
 			}
+		} else {
+			buf.WriteStringln("DO")
+			buf.WriteStringln("$BLOCK$")
+			buf.WriteNTabStringln("BEGIN", 1)
+			for _, t := range n.Tables {
+				for _, con := range t.Constraints {
+					if con.RawTp == ast.ConstraintIndex {
+						buf.WriteNTabStringln("BEGIN", 2)
+						indexName := "idx_" + t.Name
+						var keyName []string
+						for _, k := range con.Keys {
+							indexName += "_" + k
+							keyName = append(keyName, quota(k))
+						}
+						buf.WriteNTabStringln(fmt.Sprintf(`CREATE INDEX "%s" ON "%s" (%s);`, indexName, t.Name, strings.Join(keyName, ",")), 3)
+						buf.WriteNTabStringln("EXCEPTION", 2)
+						buf.WriteNTabStringln("WHEN duplicate_table", 3)
+						buf.WriteNTabStringln(fmt.Sprintf(`THEN RAISE NOTICE 'index ''%s'' on %s already exists, skipping';`, indexName, t.Name), 4)
+						buf.WriteNTabStringln("END;", 2)
+					}
+				}
+			}
+			buf.WriteNTabStringln("END;", 1)
+			buf.WriteStringln("$BLOCK$;")
+			buf.WriteStringln("END;")
 		}
-		resBuf.WriteNTabStringln("END;", 1)
-		resBuf.WriteStringln("$BLOCK$;")
-		resBuf.WriteStringln("END;")
-		resBuf.WriteByte('\n')
+		buf.WriteByte('\n')
 	}
+}
 
-	return strings.TrimSpace(resBuf.String())
+func (n *Node) ToSQL() string {
+	buf := sql.NewSQLBuffer()
+	n.writeSQLWithCreateTable(buf)
+	return strings.TrimSpace(buf.String())
 }
 
 func quota(fieldName string) string {

@@ -3,18 +3,26 @@ package mysql
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
-	"github.com/csql/internal/sql/postgresql"
 	"github.com/manifoldco/promptui"
 	"github.com/pingcap/tidb/parser"
 	"github.com/pingcap/tidb/parser/ast"
 	_ "github.com/pingcap/tidb/types/parser_driver"
+	"github.com/sineycoder/csql/internal/sql/postgresql"
 )
 
+type DBType string
+
 const (
-	Postgresql = "postgresql"
-	Oracle     = "oracle"
+	PostgresqlCompatible DBType = "postgresql-compatible"
+	Postgresql           DBType = "postgresql"
+	Oracle               DBType = "oracle"
+)
+
+var (
+	SupportDBTypes = []DBType{PostgresqlCompatible, Postgresql}
 )
 
 func parse(sql string) (*ast.StmtNode, error) {
@@ -30,23 +38,13 @@ func parse(sql string) (*ast.StmtNode, error) {
 	return &stmtNodes[0], nil
 }
 
-func Run(path string, output string) error {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("seleted path must be a mysql sql file")
-	}
+var (
+	reg1 = regexp.MustCompile("/\\*[\\s\\S]*\\*/")
+	reg2 = regexp.MustCompile("--.*\n")
+)
 
-	prompt := promptui.Select{
-		Label: "Select db type you want to convert to",
-		Items: []string{Postgresql},
-	}
-
-	_, choose, err := prompt.Run()
-	if err != nil {
-		return err
-	}
-
-	splits := strings.Split(string(b), ";")
+func ParseSQLToString(sql string, dbType DBType) (string, error) {
+	splits := strings.Split(sql, ";")
 	tableNode := &postgresql.Node{}
 	for _, s := range splits {
 		s = strings.TrimSpace(s)
@@ -55,7 +53,7 @@ func Run(path string, output string) error {
 		}
 		node, err := parse(s + ";")
 		if err != nil {
-			return err
+			return "", err
 		}
 		if node != nil {
 			(*node).Accept(tableNode)
@@ -63,12 +61,43 @@ func Run(path string, output string) error {
 	}
 
 	var result string
-	switch choose {
+	switch dbType {
+	case PostgresqlCompatible:
+		tableNode.Version = 9.4
+		return tableNode.ToSQL(), nil
 	case Postgresql:
-		result = tableNode.ToSQL()
-	default:
-		return fmt.Errorf("not support")
+		tableNode.Version = 9.5
+		return tableNode.ToSQL(), nil
 	}
+	return result, fmt.Errorf("not support %s", dbType)
+}
+
+func Run(path string, output string) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("seleted path must be a mysql sql file")
+	}
+
+	sql := string(b)
+	sql = reg1.ReplaceAllString(sql, "")
+	sql = reg2.ReplaceAllString(sql, "")
+	sql = strings.TrimSpace(sql)
+
+	prompt := promptui.Select{
+		Label: "Select db type you want to convert to",
+		Items: SupportDBTypes,
+	}
+
+	_, choose, err := prompt.Run()
+	if err != nil {
+		return err
+	}
+
+	result, err := ParseSQLToString(sql, DBType(choose))
+	if err != nil {
+		return err
+	}
+
 	if output != "" {
 		return os.WriteFile(output, []byte(result), os.ModePerm)
 	}
