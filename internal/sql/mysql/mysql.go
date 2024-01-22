@@ -13,10 +13,16 @@ import (
 	_ "github.com/pingcap/tidb/types/parser_driver"
 )
 
+type DBType string
+
 const (
-	PostgresqlCompatible = "postgresql-compatible"
-	Postgresql           = "postgresql"
-	Oracle               = "oracle"
+	PostgresqlCompatible DBType = "postgresql-compatible"
+	Postgresql           DBType = "postgresql"
+	Oracle               DBType = "oracle"
+)
+
+var (
+	SupportDBTypes = []DBType{PostgresqlCompatible, Postgresql}
 )
 
 func parse(sql string) (*ast.StmtNode, error) {
@@ -37,6 +43,35 @@ var (
 	reg2 = regexp.MustCompile("--.*\n")
 )
 
+func ParseSQLToString(sql string, dbType DBType) (string, error) {
+	splits := strings.Split(sql, ";")
+	tableNode := &postgresql.Node{}
+	for _, s := range splits {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		node, err := parse(s + ";")
+		if err != nil {
+			return "", err
+		}
+		if node != nil {
+			(*node).Accept(tableNode)
+		}
+	}
+
+	var result string
+	switch dbType {
+	case PostgresqlCompatible:
+		tableNode.Version = 9.4
+		return tableNode.ToSQL(), nil
+	case Postgresql:
+		tableNode.Version = 9.5
+		return tableNode.ToSQL(), nil
+	}
+	return result, fmt.Errorf("not support %s", dbType)
+}
+
 func Run(path string, output string) error {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -50,7 +85,7 @@ func Run(path string, output string) error {
 
 	prompt := promptui.Select{
 		Label: "Select db type you want to convert to",
-		Items: []string{PostgresqlCompatible, Postgresql},
+		Items: SupportDBTypes,
 	}
 
 	_, choose, err := prompt.Run()
@@ -58,33 +93,11 @@ func Run(path string, output string) error {
 		return err
 	}
 
-	splits := strings.Split(sql, ";")
-	tableNode := &postgresql.Node{}
-	for _, s := range splits {
-		s = strings.TrimSpace(s)
-		if s == "" {
-			continue
-		}
-		node, err := parse(s + ";")
-		if err != nil {
-			return err
-		}
-		if node != nil {
-			(*node).Accept(tableNode)
-		}
+	result, err := ParseSQLToString(sql, DBType(choose))
+	if err != nil {
+		return err
 	}
 
-	var result string
-	switch choose {
-	case PostgresqlCompatible:
-		tableNode.Version = 9.4
-		result = tableNode.ToSQL()
-	case Postgresql:
-		tableNode.Version = 9.5
-		result = tableNode.ToSQL()
-	default:
-		return fmt.Errorf("not support")
-	}
 	if output != "" {
 		return os.WriteFile(output, []byte(result), os.ModePerm)
 	}
