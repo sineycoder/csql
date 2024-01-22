@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/sineycoder/csql/internal/sql/mysql"
+	"github.com/sineycoder/csql/sql/mysql"
 	"github.com/urfave/cli/v2"
 )
 

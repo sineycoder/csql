@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/pingcap/tidb/parser/ast"
-	"github.com/sineycoder/csql/internal/sql"
+	"github.com/sineycoder/csql/sql"
 )
 
 func (c *Column) Write(buf *sql.SQLBuffer) (isWrite bool) {

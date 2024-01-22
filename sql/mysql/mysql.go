@@ -10,7 +10,7 @@ import (
 	"github.com/pingcap/tidb/parser"
 	"github.com/pingcap/tidb/parser/ast"
 	_ "github.com/pingcap/tidb/types/parser_driver"
-	"github.com/sineycoder/csql/internal/sql/postgresql"
+	"github.com/sineycoder/csql/sql/postgresql"
 )
 
 type DBType string
