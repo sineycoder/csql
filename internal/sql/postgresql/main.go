@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/csql/internal/sql"
 	"github.com/pingcap/tidb/parser/ast"
+	"github.com/sineycoder/csql/internal/sql"
 )
 
 func (c *Column) Write(buf *sql.SQLBuffer) (isWrite bool) {

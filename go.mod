@@ -1,4 +1,4 @@
-module github.com/csql
+module github.com/sineycoder/csql
 
 go 1.20
 
