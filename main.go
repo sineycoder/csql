@@ -1,6 +1,6 @@
 package main
 
-import "github.com/sineycoder/csql/internal/cmd"
+import "github.com/sineycoder/csql/cmd"
 
 func main() {
 	if err := cmd.Init(); err != nil {
