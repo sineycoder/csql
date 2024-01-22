@@ -59,7 +59,7 @@ func (n *Node) writeSQLWithCreateTable(buf *sql.SQLBuffer) {
 	// ddl
 	hasAutoIncrement := false
 	hasIndex := false
-	for _, t := range n.Tables {
+	for _, t := range n.CreateTables {
 		// table
 		tmpBuf.Reset()
 		tmpBuf.WriteString("CREATE TABLE ")
@@ -113,7 +113,7 @@ func (n *Node) writeSQLWithCreateTable(buf *sql.SQLBuffer) {
 		buf.WriteStringln("DO")
 		buf.WriteStringln("$BLOCK$")
 		buf.WriteNTabStringln("BEGIN", 1)
-		for _, t := range n.Tables {
+		for _, t := range n.CreateTables {
 			for _, col := range t.Columns {
 				if col.IsPrimaryKey && col.IsIncrement {
 					buf.WriteNTabStringln("BEGIN", 2)
@@ -136,7 +136,7 @@ func (n *Node) writeSQLWithCreateTable(buf *sql.SQLBuffer) {
 
 	if hasIndex {
 		if n.Version >= 9.5 {
-			for _, t := range n.Tables {
+			for _, t := range n.CreateTables {
 				for _, con := range t.Constraints {
 					if con.RawTp == ast.ConstraintIndex {
 						indexName := "idx_" + t.Name
@@ -153,7 +153,7 @@ func (n *Node) writeSQLWithCreateTable(buf *sql.SQLBuffer) {
 			buf.WriteStringln("DO")
 			buf.WriteStringln("$BLOCK$")
 			buf.WriteNTabStringln("BEGIN", 1)
-			for _, t := range n.Tables {
+			for _, t := range n.CreateTables {
 				for _, con := range t.Constraints {
 					if con.RawTp == ast.ConstraintIndex {
 						buf.WriteNTabStringln("BEGIN", 2)

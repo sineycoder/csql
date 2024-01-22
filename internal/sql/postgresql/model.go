@@ -3,11 +3,10 @@ package postgresql
 import "github.com/pingcap/tidb/parser/ast"
 
 type Node struct {
-	Tables  []*Table
-	Version float64
+	CreateTables []*Table
+	AlterTables  []*Table
+	Version      float64
 }
-
-type Keys []string
 
 type Table struct {
 	Name        string
@@ -18,17 +17,19 @@ type Table struct {
 }
 
 type Column struct {
-	Name         string
-	Type         string
-	DefaultValue string
-	IsNotNull    bool
-	IsPrimaryKey bool
-	IsIncrement  bool
-	Comment      string
+	Name           string
+	OldName        string // 用于旧名改新名
+	Type           string
+	AlterTableType ast.AlterTableType // 用于alter table使用，有add、drop、change、modify等
+	DefaultValue   string
+	IsNotNull      bool
+	IsPrimaryKey   bool
+	IsIncrement    bool
+	Comment        string
 }
 
 type Constraint struct {
 	Name  string
 	RawTp ast.ConstraintType // ast.ConstraintUniq/ast.ConstraintPrimaryKey can be written in table
-	Keys  Keys
+	Keys  []string
 }

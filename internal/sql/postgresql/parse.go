@@ -4,9 +4,6 @@ import (
 	"fmt"
 
 	"github.com/pingcap/tidb/parser/ast"
-	"github.com/pingcap/tidb/parser/mysql"
-	"github.com/pingcap/tidb/types"
-	driver "github.com/pingcap/tidb/types/parser_driver"
 )
 
 func (v *Node) parseColumn(stmt *ast.CreateTableStmt) []*Column {
@@ -14,81 +11,14 @@ func (v *Node) parseColumn(stmt *ast.CreateTableStmt) []*Column {
 	for _, col := range stmt.Cols {
 		c := &Column{}
 		c.Name = col.Name.Name.O
-		switch col.Tp.GetType() {
-		case mysql.TypeTiny, mysql.TypeShort:
-			c.Type = "smallint"
-		case mysql.TypeLong:
-			c.Type = "int"
-		case mysql.TypeInt24, mysql.TypeLonglong:
-			c.Type = "bigint"
-		case mysql.TypeFloat:
-			c.Type = "real"
-		case mysql.TypeDouble:
-			c.Type = "double precision"
-		case mysql.TypeNewDecimal:
-			if col.Tp.GetFlen() == -1 && col.Tp.GetDecimal() == -1 {
-				c.Type = "decimal"
-			} else {
-				c.Type = fmt.Sprintf("decimal(%d,%d)", col.Tp.GetFlen(), col.Tp.GetDecimal())
-			}
-		case mysql.TypeString:
-			c.Type = fmt.Sprintf("char(%d)", col.Tp.GetFlen())
-		case mysql.TypeVarchar:
-			c.Type = fmt.Sprintf("varchar(%d)", col.Tp.GetFlen())
-		case mysql.TypeJSON:
-			c.Type = "json"
-		case mysql.TypeLongBlob, mysql.TypeTinyBlob, mysql.TypeBlob, mysql.TypeMediumBlob:
-			if mysql.HasBinaryFlag(col.Tp.GetFlag()) {
-				c.Type = "bytea"
-			} else {
-				c.Type = "text"
-			}
-		case mysql.TypeVarString:
-			c.Type = "text"
-		case mysql.TypeTimestamp, mysql.TypeDatetime:
-			c.Type = "timestamp(0)"
-		case mysql.TypeDate:
-			c.Type = "date"
-		default:
+
+		// 根据字段类型获取string值
+		if c.Type = FieldTypeToString(col.Tp); c.Type == "" {
 			panic(fmt.Sprintf("%s.%s' type cannot support in pg", stmt.Table.Name.O, c.Name))
 		}
 
-		for idx, op := range col.Options {
-			switch op.Tp {
-			case ast.ColumnOptionNotNull:
-				c.IsNotNull = true
-			case ast.ColumnOptionPrimaryKey:
-				c.IsPrimaryKey = true
-			case ast.ColumnOptionAutoIncrement:
-				c.IsIncrement = true
-			case ast.ColumnOptionComment:
-				if expr, ok := op.Expr.(*driver.ValueExpr); ok {
-					c.Comment = expr.GetDatumString()
-				}
+		InjectColumnOption(col, c)
 
-			case ast.ColumnOptionDefaultValue:
-				switch tp := op.Expr.(type) {
-				case *driver.ValueExpr:
-					switch tp.Datum.Kind() {
-					case types.KindInt64:
-						c.DefaultValue = fmt.Sprintf("%d", tp.Datum.GetInt64())
-					case types.KindUint64:
-						c.DefaultValue = fmt.Sprintf("%d", tp.Datum.GetUint64())
-					case types.KindMysqlDecimal:
-						d := tp.Datum.GetInterface().(*types.MyDecimal)
-						c.DefaultValue = d.String()
-					case types.KindString:
-						c.DefaultValue = quotaValue(string(tp.Datum.GetBytes()))
-					}
-				case *ast.FuncCallExpr:
-					if col.Tp.GetType() == mysql.TypeTimestamp || col.Tp.GetType() == mysql.TypeDatetime {
-						c.DefaultValue = tp.FnName.O
-					} else {
-						panic(fmt.Sprintf("%s.%s %d option cannot support in pg", stmt.Table.Name.O, c.Name, idx))
-					}
-				}
-			}
-		}
 		columns = append(columns, c)
 	}
 
@@ -120,7 +50,7 @@ func (v *Node) parseConstraint(stmt *ast.CreateTableStmt, t *Table) []*Constrain
 	return constraints
 }
 
-func (v *Node) parseTable(stmt *ast.CreateTableStmt) {
+func (v *Node) parseCreateTable(stmt *ast.CreateTableStmt) {
 	t := &Table{}
 	t.Name = stmt.Table.Name.O
 	t.IfNotExists = stmt.IfNotExists
@@ -136,15 +66,48 @@ func (v *Node) parseTable(stmt *ast.CreateTableStmt) {
 		}
 	}
 
-	v.Tables = append(v.Tables, t)
+	v.CreateTables = append(v.CreateTables, t)
+}
+
+func (v *Node) parseAlterTable(stmt *ast.AlterTableStmt) {
+	fmt.Println(stmt)
+	t := &Table{}
+	t.Name = stmt.Table.Name.O
+	var columns []*Column
+	for _, spec := range stmt.Specs {
+		switch spec.Tp {
+		case ast.AlterTableAddColumns, ast.AlterTableModifyColumn, ast.AlterTableDropColumn, ast.AlterTableChangeColumn:
+			c := &Column{}
+			c.AlterTableType = spec.Tp
+			if len(spec.NewColumns) > 0 {
+				c.Name = spec.NewColumns[0].Name.Name.O
+				if c.Type = FieldTypeToString(spec.NewColumns[0].Tp); c.Type == "" {
+					panic(fmt.Sprintf("%s.%s' type cannot support in pg", t.Name, c.Name))
+				}
+
+				InjectColumnOption(spec.NewColumns[0], c)
+			}
+			if spec.OldColumnName != nil {
+				c.OldName = spec.OldColumnName.Name.O
+			}
+			columns = append(columns, c)
+		default:
+			panic("not support such alter table type")
+		}
+	}
+	t.Columns = columns
+	fmt.Println(columns)
 }
 
 func (v *Node) Enter(in ast.Node) (ast.Node, bool) {
-	if sc, ok := in.(*ast.CreateTableStmt); ok {
-		v.parseTable(sc)
+	switch tp := in.(type) {
+	case *ast.CreateTableStmt:
+		v.parseCreateTable(tp)
 		return in, true
+	case *ast.AlterTableStmt:
+		v.parseAlterTable(tp)
 	}
-	//fmt.Printf("%T -> %+v\n", in, in)
+	fmt.Printf("%T -> %+v\n", in, in)
 	return in, false
 }
 
